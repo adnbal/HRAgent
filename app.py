@@ -1,17 +1,19 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import openai
 import re
 from fpdf import FPDF
 from io import BytesIO
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from openai import OpenAI
 
-# --------------- Configuration ----------------
-openai.api_key = st.secrets["openai"]["api_key"]
-if "organization" in st.secrets["openai"]:
-    openai.organization = st.secrets["openai"]["organization"]
+# ---------- OpenAI Client (v1 SDK) ----------
+client = OpenAI(
+    api_key=st.secrets["openai"]["api_key"],
+    organization=st.secrets["openai"].get("organization", None)
+)
 
+# ---------- Twilio WhatsApp Config ----------
 try:
     twilio_sid = st.secrets["twilio"]["account_sid"]
     twilio_token = st.secrets["twilio"]["auth_token"]
@@ -21,7 +23,12 @@ except KeyError:
     st.error("❌ Missing Twilio or OpenAI credentials.")
     st.stop()
 
-# --------------- Neon CSS ----------------
+def send_whatsapp_alert(message):
+    from twilio.rest import Client
+    client = Client(twilio_sid, twilio_token)
+    client.messages.create(body=message, from_=whatsapp_from, to=whatsapp_to)
+
+# ---------- Neon Glowing UI ----------
 st.markdown("""
 <style>
 .neon-box {
@@ -42,9 +49,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --------------- Functions ----------------
+# ---------- Utility Functions ----------
 def ask_openai(prompt):
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[
             {"role": "system", "content": "You are a helpful AI assistant."},
@@ -53,11 +60,6 @@ def ask_openai(prompt):
         temperature=0.7
     )
     return response.choices[0].message.content
-
-def send_whatsapp_alert(message):
-    from twilio.rest import Client
-    client = Client(twilio_sid, twilio_token)
-    client.messages.create(body=message, from_=whatsapp_from, to=whatsapp_to)
 
 def extract_text_from_pdf(file):
     doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -81,7 +83,7 @@ def fetch_dummy_jobs(keyword):
         {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
     ]
 
-# --------------- UI ----------------
+# ---------- App UI ----------
 st.set_page_config(page_title="🚀 AI CV Matcher", layout="wide")
 st.title("🌟 AI CV Matcher with Tailored Resume, WhatsApp Alerts & Glowing Demo UI")
 
@@ -94,7 +96,7 @@ if uploaded_file:
 
     keyword_prompt = """
     From this CV summary, extract the top 3 job roles best suited for the candidate.
-    Output just the roles in plain list:
+    Output just the roles in plain list like:
     - Data Analyst
     - AI Engineer
     - Business Consultant
@@ -106,7 +108,7 @@ if uploaded_file:
 
     st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b> {search_keyword.title()}</div>', unsafe_allow_html=True)
 
-    # Country & location
+    # Country & Location
     country_map = {
         "United States": "us", "New Zealand": "nz", "United Kingdom": "gb",
         "Australia": "au", "Canada": "ca", "India": "in"
@@ -114,10 +116,10 @@ if uploaded_file:
     country = st.selectbox("🌍 Choose Country", list(country_map.keys()), index=0)
     location = st.text_input("📍 City or Region (optional)", "")
 
-    # Dummy job search
+    # Dummy Jobs
     jobs = fetch_dummy_jobs(search_keyword)
 
-    # Embedding and matching
+    # Semantic Similarity Matching
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
     cv_vec = embedder.encode([cv_summary])[0]
 
@@ -131,14 +133,12 @@ if uploaded_file:
         with st.expander("📄 View Details"):
             st.write(job["description"])
 
-            # Matching advice
             reasoning = ask_openai(
                 f"Given this CV summary:\n{cv_summary}\n\nAnd this job:\n{job['description']}\n\n"
                 "Why is this a good match? What's missing? Should the candidate apply?"
             )
             st.success(reasoning)
 
-            # Tailor CV
             if st.button(f"✍️ Tailor CV for this job", key=f"tailor_{i}"):
                 tailored_cv = ask_openai(
                     f"Write a tailored version of this CV for the job below.\nJob: {job['description']}\nOriginal CV:\n{cv_summary}"
@@ -150,7 +150,6 @@ if uploaded_file:
 
                 st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_{i}")
 
-            # WhatsApp alert if match ≥ 50%
             if match >= 0.5:
                 try:
                     send_whatsapp_alert(f"✅ Match: {job['title']} ({match_pct}%)\nApply: {job['url']}")
@@ -158,12 +157,12 @@ if uploaded_file:
                 except Exception as e:
                     st.warning(f"❌ WhatsApp failed: {e}")
 
-    # CV Score
+    # CV Quality Score
     st.subheader("📈 CV Quality Score (AI)")
-    score_response = ask_openai(f"Score this CV out of 100 and explain:\n{cv_summary}")
+    score_response = ask_openai(f"Score this CV out of 100 and explain briefly:\n{cv_summary}")
     st.markdown(f'<div class="neon-box">{score_response}</div>', unsafe_allow_html=True)
 
-    # Q&A
+    # Q&A Section
     st.subheader("🤖 Ask AI About Your Career or CV")
     user_q = st.text_input("💬 Your question:")
     if user_q:
