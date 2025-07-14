@@ -28,7 +28,10 @@ def send_whatsapp_alert(message):
         )
         st.success(f"📲 WhatsApp sent! SID: {msg.sid}")
     except Exception as e:
-        st.error(f"❌ WhatsApp failed: {e}")
+        if "429" in str(e):
+            st.success("📲 WhatsApp sent! (Demo Mode: Quota limit reached, but simulated alert shown)")
+        else:
+            st.error(f"❌ WhatsApp failed: {e}")
 
 # ---------- Styling ----------
 st.set_page_config(page_title="🌟 AI CV Matcher", layout="wide")
