@@ -1,19 +1,15 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import re
+import requests
 from fpdf import FPDF
 from io import BytesIO
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 
-# ---------- OpenAI Client (v1 SDK) ----------
-client = OpenAI(
-    api_key=st.secrets["openai"]["api_key"],
-    organization=st.secrets["openai"].get("organization", None)
-)
-
-# ---------- Twilio WhatsApp Config ----------
+# ------------------- CONFIG -------------------
+client = OpenAI(api_key=st.secrets["openai"]["api_key"])
 try:
     twilio_sid = st.secrets["twilio"]["account_sid"]
     twilio_token = st.secrets["twilio"]["auth_token"]
@@ -28,7 +24,7 @@ def send_whatsapp_alert(message):
     client = Client(twilio_sid, twilio_token)
     client.messages.create(body=message, from_=whatsapp_from, to=whatsapp_to)
 
-# ---------- Neon Glowing UI ----------
+# ------------------- STYLE -------------------
 st.markdown("""
 <style>
 .neon-box {
@@ -49,7 +45,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Utility Functions ----------
+# ------------------- UTILS -------------------
 def ask_openai(prompt):
     response = client.chat.completions.create(
         model="gpt-4",
@@ -76,6 +72,30 @@ def generate_pdf(text):
     buffer.seek(0)
     return buffer
 
+def fetch_adzuna_jobs(keyword, country_code, location=None):
+    try:
+        app_id = st.secrets["adzuna"]["app_id"]
+        app_key = st.secrets["adzuna"]["app_key"]
+        base = f"https://api.adzuna.com/v1/api/jobs/{country_code}/search/1"
+        params = {
+            "app_id": app_id,
+            "app_key": app_key,
+            "results_per_page": 6,
+            "what": keyword,
+            "where": location or ""
+        }
+        res = requests.get(base, params=params)
+        res.raise_for_status()
+        jobs = res.json().get("results", [])
+        return [{
+            "title": j["title"],
+            "location": j["location"]["display_name"],
+            "description": j["description"],
+            "url": j["redirect_url"]
+        } for j in jobs]
+    except Exception:
+        return []
+
 def fetch_dummy_jobs(keyword):
     return [
         {"title": f"{keyword.title()} at TechCorp", "location": "Remote", "description": f"Join us as a {keyword}.", "url": "https://example.com/job1"},
@@ -83,7 +103,7 @@ def fetch_dummy_jobs(keyword):
         {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
     ]
 
-# ---------- App UI ----------
+# ------------------- APP UI -------------------
 st.set_page_config(page_title="🚀 AI CV Matcher", layout="wide")
 st.title("🌟 AI CV Matcher with Tailored Resume, WhatsApp Alerts & Glowing Demo UI")
 
@@ -108,7 +128,6 @@ if uploaded_file:
 
     st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b> {search_keyword.title()}</div>', unsafe_allow_html=True)
 
-    # Country & Location
     country_map = {
         "United States": "us", "New Zealand": "nz", "United Kingdom": "gb",
         "Australia": "au", "Canada": "ca", "India": "in"
@@ -116,10 +135,11 @@ if uploaded_file:
     country = st.selectbox("🌍 Choose Country", list(country_map.keys()), index=0)
     location = st.text_input("📍 City or Region (optional)", "")
 
-    # Dummy Jobs
-    jobs = fetch_dummy_jobs(search_keyword)
+    jobs = fetch_adzuna_jobs(search_keyword, country_map[country], location)
+    if not jobs:
+        st.warning("⚠️ No live jobs found, showing fallback examples.")
+        jobs = fetch_dummy_jobs(search_keyword)
 
-    # Semantic Similarity Matching
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
     cv_vec = embedder.encode([cv_summary])[0]
 
@@ -132,7 +152,6 @@ if uploaded_file:
         st.markdown(f"### 🔹 [{job['title']} – {job['location']}]({job['url']}) — {match_pct}% Match")
         with st.expander("📄 View Details"):
             st.write(job["description"])
-
             reasoning = ask_openai(
                 f"Given this CV summary:\n{cv_summary}\n\nAnd this job:\n{job['description']}\n\n"
                 "Why is this a good match? What's missing? Should the candidate apply?"
@@ -150,6 +169,8 @@ if uploaded_file:
 
                 st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_{i}")
 
+            st.button("🤖 Auto-Apply for this Job (Dummy)", key=f"autoapply_{i}")
+
             if match >= 0.5:
                 try:
                     send_whatsapp_alert(f"✅ Match: {job['title']} ({match_pct}%)\nApply: {job['url']}")
@@ -157,14 +178,20 @@ if uploaded_file:
                 except Exception as e:
                     st.warning(f"❌ WhatsApp failed: {e}")
 
-    # CV Quality Score
     st.subheader("📈 CV Quality Score (AI)")
     score_response = ask_openai(f"Score this CV out of 100 and explain briefly:\n{cv_summary}")
     st.markdown(f'<div class="neon-box">{score_response}</div>', unsafe_allow_html=True)
 
-    # Q&A Section
     st.subheader("🤖 Ask AI About Your Career or CV")
     user_q = st.text_input("💬 Your question:")
     if user_q:
         reply = ask_openai(f"Q: {user_q}\nContext:\n{cv_summary}")
         st.markdown(f"**🧠 AI Answer:** {reply}")
+
+        if "You should" in reply or "consider" in reply:
+            styled_preview = ask_openai(
+                f"Based on these suggestions:\n{reply}\n\n"
+                "Give a styled preview of the updated CV in markdown format (visually appealing)."
+            )
+            st.markdown("📌 **Do you want me to make these changes and give updated CV converted to PDF?**")
+            st.markdown(styled_preview, unsafe_allow_html=True)
