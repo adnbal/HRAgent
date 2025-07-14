@@ -3,6 +3,7 @@ import fitz  # PyMuPDF
 import google.generativeai as genai
 import requests
 import re
+import pandas as pd
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -15,20 +16,13 @@ embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 # 🌍 Country codes for Adzuna
 country_map = {
-    "New Zealand": "nz",
-    "Australia": "au",
-    "United States": "us",
-    "United Kingdom": "gb",
-    "Canada": "ca",
-    "India": "in",
-    "Germany": "de",
-    "France": "fr",
-    "Netherlands": "nl",
-    "South Africa": "za"
+    "New Zealand": "nz", "Australia": "au", "United States": "us",
+    "United Kingdom": "gb", "Canada": "ca", "India": "in",
+    "Germany": "de", "France": "fr", "Netherlands": "nl", "South Africa": "za"
 }
 
 # -------------------- Adzuna API Job Fetch --------------------
-def fetch_jobs_from_adzuna(query, location="New York", country="us", max_results=10):
+def fetch_jobs_from_adzuna(query, location="", country="us", max_results=10):
     url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     params = {
         "app_id": st.secrets["adzuna"]["app_id"],
@@ -47,7 +41,8 @@ def fetch_jobs_from_adzuna(query, location="New York", country="us", max_results
         {
             "title": job["title"],
             "description": job.get("description", ""),
-            "location": job.get("location", {}).get("display_name", "")
+            "location": job.get("location", {}).get("display_name", ""),
+            "url": job.get("redirect_url", "")
         }
         for job in jobs
     ]
@@ -90,9 +85,8 @@ if uploaded_file:
         st.subheader("🧾 Gemini-Curated CV Summary")
         st.info(cv_summary)
 
-        # 🔍 Keyword Extraction and Cleaning
         keyword_prompt = f"""
-        Based on this CV, extract the top 1–3 job search keywords (e.g. 'professor', 'marketing analyst').
+        Based on this CV, extract the top 1–3 job search keywords (e.g. 'data analyst', 'AI engineer').
         Return just the keywords.
         CV:
         {cv_summary}
@@ -102,31 +96,27 @@ if uploaded_file:
             st.subheader("🧠 Raw AI Keywords")
             st.code(raw_keywords.strip())
         except:
-            raw_keywords = "professor"
+            raw_keywords = "data analyst"
 
         first_line = raw_keywords.strip().split("\n")[0]
         clean_keyword = re.sub(r"[^a-zA-Z0-9\s]", "", first_line)
         clean_keyword = re.sub(r"^\d+\s*", "", clean_keyword).strip().lower()
 
-        # 🔧 User override
-        search_keywords = st.text_input("🔍 Edit search keywords", value=clean_keyword or "professor")
-
+        search_keywords = st.text_input("🔍 Edit search keywords", value=clean_keyword or "data analyst")
         country_name = st.selectbox("🌍 Country", list(country_map.keys()), index=2)  # Default: US
         country_code = country_map[country_name]
+        location = st.text_input("📍 City or Region (optional)", value="")
 
-        location = st.text_input("📍 City or Region", value="New York")
+        if not location:
+            st.warning("🔎 No location specified. Searching broadly in selected country...")
 
-        st.subheader(f"🌐 Searching Adzuna for: `{search_keywords}` in `{location}`, {country_name}")
+        st.subheader(f"🌐 Searching Adzuna for: `{search_keywords}` in `{location or 'All Regions'}`, {country_name}")
         jobs = fetch_jobs_from_adzuna(query=search_keywords, location=location, country=country_code)
 
         if not jobs:
             st.error("❌ No jobs found. Try a different keyword or broader location.")
-            st.write("🔎 Keyword used:", search_keywords)
-            st.write("📍 Location used:", location)
-            st.write("🌍 Country used:", country_code)
             st.stop()
 
-        # 🧠 Semantic Matching
         with st.spinner("🔎 Matching your CV with job descriptions..."):
             cv_vector = embedder.encode([cv_summary])[0]
             match_scores = []
@@ -135,28 +125,41 @@ if uploaded_file:
                 score = cosine_similarity([cv_vector], [job_vector])[0][0]
                 match_scores.append((job, score))
 
-            top_jobs = sorted(match_scores, key=lambda x: x[1], reverse=True)[:3]
+            top_jobs = sorted(match_scores, key=lambda x: x[1], reverse=True)
 
-        st.subheader("✅ Top Matched Jobs")
-        for job, score in top_jobs:
-            st.markdown(f"**🧑‍💼 {job['title']}** in *{job['location']}* — Match Score: `{round(score*100, 2)}%`")
-            st.markdown(f"> {job['description'][:400]}...")
-            st.markdown("---")
+        st.subheader("📊 Top Job Matches (Semantic Similarity)")
+        job_table = pd.DataFrame([
+            {
+                "Job Title": job["title"],
+                "Location": job["location"],
+                "Match %": round(score * 100, 2)
+            }
+            for job, score in top_jobs
+        ])
+        st.dataframe(job_table, use_container_width=True)
 
-        # ✍️ Gemini-Powered Cover Letter
-        st.subheader("✍️ Gemini AI Cover Letter Advice")
-        best_job = top_jobs[0][0]
-        advice_prompt = f"""
-        I am applying for this job: {best_job['title']}
-        Job description: {best_job['description']}
+        st.subheader("🧐 Select a job to view full details and advice")
+        selected_index = st.selectbox("Choose a job", list(range(len(top_jobs))), format_func=lambda i: top_jobs[i][0]['title'])
+        selected_job, selected_score = top_jobs[selected_index]
+
+        st.markdown(f"### 🧾 Full Job Description\n**{selected_job['title']}** in *{selected_job['location']}*")
+        st.markdown(selected_job["description"])
+        if selected_job["url"]:
+            st.markdown(f"🔗 [Apply Here]({selected_job['url']})")
+
+        explain_prompt = f"""
+        I am evaluating a job match for this position: {selected_job['title']}
+        Job description: {selected_job['description']}
 
         My CV summary is: {cv_summary}
 
-        What should I highlight in my application?
-        Can you help me write a short, tailored cover letter?
+        - Why is this a good match?
+        - What is missing from my CV for this job?
+        - Should I apply? Give a short recommendation.
+        - If anything is missing, suggest how to improve it.
         """
         try:
-            letter = model.generate_content(advice_prompt).text
-            st.success(letter)
+            reasoning = model.generate_content(explain_prompt).text
+            st.success(reasoning)
         except Exception as e:
-            st.error(f"❌ Cover letter generation failed: {e}")
+            st.error(f"❌ Gemini explanation failed: {e}")
