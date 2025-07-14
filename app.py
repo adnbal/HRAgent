@@ -6,22 +6,33 @@ from fpdf import FPDF
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from twilio.rest import Client
 
-# -------------------- OpenAI v1.0+ Client --------------------
+# ---------- OpenAI GPT-4 Setup ----------
 client = OpenAI(api_key=st.secrets["openai"]["api_key"])
-
 def ask_openai(prompt):
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are an expert career advisor and CV editor."},
+            {"role": "system", "content": "You are an expert AI career and CV advisor."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.7
     )
     return response.choices[0].message.content
 
-# -------------------- UI Styling --------------------
+# ---------- Twilio WhatsApp Alert ----------
+try:
+    twilio_sid = st.secrets["twilio"]["account_sid"]
+    twilio_token = st.secrets["twilio"]["auth_token"]
+    whatsapp_to = st.secrets["twilio"]["whatsapp_to"]
+    whatsapp_from = "whatsapp:+14155238886"
+    def send_whatsapp_alert(msg):
+        Client(twilio_sid, twilio_token).messages.create(body=msg, from_=whatsapp_from, to=whatsapp_to)
+except KeyError:
+    def send_whatsapp_alert(msg): pass  # Do nothing if Twilio creds missing
+
+# ---------- Styling ----------
 st.set_page_config(page_title="🌟 AI CV Matcher", layout="wide")
 st.markdown("""
 <style>
@@ -57,29 +68,29 @@ div.stButton > button:hover {
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- Utility Functions --------------------
+# ---------- Utility Functions ----------
 def extract_text_from_pdf(file):
     doc = fitz.open(stream=file.read(), filetype="pdf")
     return "".join(page.get_text() for page in doc)
 
 def fetch_dummy_jobs(keyword):
     return [
-        {"title": f"{keyword.title()} at TechCorp", "location": "Remote", "description": f"Join us as a {keyword}.", "url": "https://example.com/job1"},
-        {"title": f"{keyword.title()} Specialist", "location": "New York", "description": f"We're looking for a {keyword} expert.", "url": "https://example.com/job2"},
-        {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
+        {"title": f"{keyword} at AI Labs", "location": "Remote", "description": f"Join our {keyword} team.", "url": "https://example.com/job1"},
+        {"title": f"{keyword} Specialist", "location": "New York", "description": f"We're seeking a {keyword} professional.", "url": "https://example.com/job2"},
+        {"title": f"Lead {keyword}", "location": "London", "description": f"Lead our {keyword} innovation group.", "url": "https://example.com/job3"},
     ]
 
-# -------------------- App Logic --------------------
-st.title("🌟 AI CV Matcher with OpenAI GPT-4")
+# ---------- App Interface ----------
+st.title("🌟 AI CV Matcher with GPT-4 & Neon Magic")
 
 uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
 
 if uploaded_file:
-    with st.spinner("📄 Reading your CV..."):
+    with st.spinner("🔍 Reading your CV..."):
         cv_text = extract_text_from_pdf(uploaded_file)
         cv_summary = ask_openai(f"Summarize this CV:\n{cv_text}")
 
-    # 👤 Preferred roles hardcoded for prototype (pretend AI detected it)
+    # 🚀 Hardcoded preferred roles
     preferred_roles = [
         "Artificial Intelligence", "Data Science", "Data Analytics", "Business Analytics",
         "Agentic AI", "Autonomous Agent", "Prompt Engineering",
@@ -88,7 +99,15 @@ if uploaded_file:
     st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b><br> ' +
                 ", ".join(preferred_roles) + '</div>', unsafe_allow_html=True)
 
-    # 🔍 Fetch dummy jobs and calculate similarity
+    # 🌍 Country & Location Inputs
+    country_map = {
+        "United States": "us", "New Zealand": "nz", "United Kingdom": "gb",
+        "Australia": "au", "Canada": "ca", "India": "in"
+    }
+    country = st.selectbox("🌍 Choose Country", list(country_map.keys()), index=0)
+    location = st.text_input("📍 City or Region (optional)", "")
+
+    # 🔎 Job Fetching & Matching
     search_keyword = "AI Specialist"
     jobs = fetch_dummy_jobs(search_keyword)
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
@@ -98,45 +117,52 @@ if uploaded_file:
     for job in jobs:
         job_vec = embedder.encode([job["description"]])[0]
         score = cosine_similarity([cv_vec], [job_vec])[0][0]
-        inflated = round(min(score * 1.2 * 100, 100), 2)  # 20% inflation
-        job_scores.append((inflated, job))
+        score_boosted = round(min(score * 1.2 * 100, 100), 2)
+        job_scores.append((score_boosted, job))
 
     job_scores = sorted(job_scores, reverse=True)
 
-    st.subheader("📊 Matched Job Listings")
+    # 📊 Show Matches
+    st.subheader("📊 Matched Jobs (Sorted & Boosted)")
     for i, (score, job) in enumerate(job_scores):
         st.markdown(f"### 🔹 [{job['title']} – {job['location']}]({job['url']}) — {score:.2f}% Match")
-
         with st.expander("📄 View Details"):
             st.write(job["description"])
 
-            reasoning = ask_openai(
-                f"Given this CV:\n{cv_summary}\nAnd this job:\n{job['description']}\n"
-                "Explain why this is a match, what's missing, and whether to apply."
+            explanation = ask_openai(
+                f"Given this CV:\n{cv_summary}\nJob description:\n{job['description']}\n"
+                "Explain the match, gaps, and whether to apply."
             )
-            st.success(reasoning)
+            st.success(explanation)
 
             if st.button("✍️ Tailor CV for this job", key=f"tailor_{i}"):
                 tailored_cv = ask_openai(
-                    f"Write a tailored version of this CV for the job below.\nJob: {job['description']}\nCV:\n{cv_summary}"
+                    f"Write a full tailored version of this CV for the job below.\nJob: {job['description']}\nCV:\n{cv_summary}"
                 )
                 st.markdown(f'<div class="small-cv">{tailored_cv}</div>', unsafe_allow_html=True)
 
             st.button("⚡ Auto-Apply", key=f"autoapply_{i}")
 
-    # 📈 CV Score & Improvement Option
-    st.subheader("📈 CV Quality Score (AI Evaluation)")
-    score_response = ask_openai(f"Score this CV out of 100 and explain improvements:\n{cv_summary}")
-    st.markdown(f'<div class="neon-box">{score_response}</div>', unsafe_allow_html=True)
+            if score >= 50:
+                try:
+                    send_whatsapp_alert(f"✅ Match: {job['title']} ({score:.2f}%)\nApply: {job['url']}")
+                    st.success("📲 WhatsApp alert sent!")
+                except Exception as e:
+                    st.warning(f"❌ WhatsApp failed: {e}")
 
-    if st.button("✨ Improve My CV Based on AI Suggestions"):
-        improved_cv = ask_openai(f"Improve this CV based on your own feedback:\n{cv_summary}")
-        st.markdown("#### 📄 Updated CV (Preview)", unsafe_allow_html=True)
+    # 📈 CV Quality & Full Rewrite
+    st.subheader("📈 CV Quality Score (AI Review)")
+    feedback = ask_openai(f"Evaluate this CV (out of 100) and give improvement suggestions:\n{cv_summary}")
+    st.markdown(f'<div class="neon-box">{feedback}</div>', unsafe_allow_html=True)
+
+    if st.button("✨ Improve My CV Based on Feedback"):
+        improved_cv = ask_openai(f"Rewrite this full CV to reflect all improvements:\n{cv_text}")
+        st.markdown("#### 📄 Updated CV Preview", unsafe_allow_html=True)
         st.markdown(f'<div class="small-cv">{improved_cv}</div>', unsafe_allow_html=True)
 
-    # 💬 Q&A
-    st.subheader("💬 Ask Anything About Your Career or CV")
-    user_q = st.text_input("Type your question:")
+    # 💬 Q&A Section
+    st.subheader("🤖 Ask AI About Your Career or CV")
+    user_q = st.text_input("💬 Your question:")
     if user_q:
-        answer = ask_openai(f"Q: {user_q}\nContext:\n{cv_summary}")
-        st.markdown(f"**🧠 AI Answer:** {answer}")
+        reply = ask_openai(f"Q: {user_q}\nContext:\n{cv_summary}")
+        st.markdown(f"**🧠 AI Answer:** {reply}")
