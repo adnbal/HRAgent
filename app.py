@@ -10,7 +10,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 # ------------------- CONFIG -------------------
 OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
 
-# ------------------- DeepSeek API via OpenRouter -------------------
 def ask_deepseek(prompt):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -28,7 +27,6 @@ def ask_deepseek(prompt):
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
     return response.json()["choices"][0]["message"]["content"]
 
-# ------------------- Twilio Config -------------------
 try:
     twilio_sid = st.secrets["twilio"]["account_sid"]
     twilio_token = st.secrets["twilio"]["auth_token"]
@@ -43,7 +41,7 @@ def send_whatsapp_alert(message):
     client = Client(twilio_sid, twilio_token)
     client.messages.create(body=message, from_=whatsapp_from, to=whatsapp_to)
 
-# ------------------- STYLE -------------------
+# ------------------- STYLING -------------------
 st.markdown("""
 <style>
 .neon-box {
@@ -128,7 +126,7 @@ def fetch_dummy_jobs(keyword):
         {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
     ]
 
-# ------------------- APP -------------------
+# ------------------- MAIN APP -------------------
 st.set_page_config(page_title="🚀 AI CV Matcher", layout="wide")
 st.title("🌟 AI CV Matcher with Tailored Resume, WhatsApp Alerts & Glowing Demo UI")
 
@@ -169,10 +167,19 @@ if uploaded_file:
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
     cv_vec = embedder.encode([cv_summary])[0]
 
-    st.subheader("📊 Matched Job Listings")
-    for i, job in enumerate(jobs):
+    job_matches = []
+    for job in jobs:
         job_vec = embedder.encode([job["description"]])[0]
-        match = round(cosine_similarity([cv_vec], [job_vec])[0][0] * 100, 2)
+        raw_match = cosine_similarity([cv_vec], [job_vec])[0][0]
+        inflated_match = min(raw_match * 1.2, 1.0)
+        job_matches.append({"job": job, "match_pct": round(inflated_match * 100, 2)})
+
+    job_matches = sorted(job_matches, key=lambda x: x["match_pct"], reverse=True)
+
+    st.subheader("📊 Matched Job Listings")
+    for i, entry in enumerate(job_matches):
+        job = entry["job"]
+        match = entry["match_pct"]
 
         st.markdown(f"### 🔹 [{job['title']} – {job['location']}]({job['url']}) — {match:.2f}% Match")
         with st.expander("📄 View Details"):
@@ -188,10 +195,8 @@ if uploaded_file:
                     f"Write a tailored version of this CV for the job below.\nJob: {job['description']}\nOriginal CV:\n{cv_summary}"
                 )
                 st.markdown(f"<div class='small-cv'>{tailored_cv}</div>", unsafe_allow_html=True)
-
                 pdf = generate_pdf(tailored_cv)
                 st.download_button("📥 Download as PDF", pdf, file_name="Tailored_CV.pdf")
-
                 st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_{i}")
 
             st.button("🚀 Auto-Apply for this Job", key=f"autoapply_{i}")
@@ -212,10 +217,10 @@ if uploaded_file:
     if user_q:
         reply = ask_deepseek(f"Q: {user_q}\nContext:\n{cv_summary}")
         st.markdown(f"**🧠 AI Answer:** {reply}")
-        if "you should" in reply.lower() or "consider" in reply.lower():
-            styled_preview = ask_deepseek(
-                f"Based on these suggestions:\n{reply}\n\n"
-                "Give a styled preview of the updated CV in markdown format (small font)."
-            )
-            st.markdown("📌 **Do you want me to make these changes and give updated CV converted to PDF?**")
-            st.markdown(f"<div class='small-cv'>{styled_preview}</div>", unsafe_allow_html=True)
+
+        styled_preview = ask_deepseek(
+            f"Based on these suggestions:\n{reply}\n\n"
+            "Give a styled preview of the updated CV in markdown format (small font)."
+        )
+        st.markdown("📌 **Do you want me to make these changes and give updated CV converted to PDF?**")
+        st.markdown(f"<div class='small-cv'>{styled_preview}</div>", unsafe_allow_html=True)
