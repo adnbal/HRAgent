@@ -5,16 +5,16 @@ import re
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-
-# ----------------- DeepSeek via OpenRouter Setup -----------------
 import json
 
+# ----------------- DeepSeek via OpenRouter Setup -----------------
 OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
 headers = {
     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
     "HTTP-Referer": "https://chat.openai.com/",
     "Content-Type": "application/json"
 }
+
 def ask_deepseek(prompt):
     url = "https://openrouter.ai/api/v1/chat/completions"
     payload = {
@@ -109,7 +109,7 @@ if uploaded_file:
         {cv_summary}
         """
         raw_keywords = ask_deepseek(keyword_prompt)
-        st.subheader("🧠 AI Keywords")
+        st.subheader("🧠 Best Role Suited for You")
         st.code(raw_keywords.strip())
 
         first_line = raw_keywords.strip().split("\n")[0]
@@ -142,35 +142,31 @@ if uploaded_file:
             top_jobs = sorted(match_scores, key=lambda x: x[1], reverse=True)
 
         st.subheader("📊 Top Job Matches (Semantic Similarity)")
-        job_table = pd.DataFrame([
-            {
-                "Job Title": job["title"],
-                "Location": job["location"],
-                "Match %": round(score * 100, 2)
-            }
-            for job, score in top_jobs
-        ])
-        st.dataframe(job_table, use_container_width=True)
+        for i, (job, score) in enumerate(top_jobs):
+            st.markdown(
+                f"### [{job['title']} - {job['location']}]({job['url']})\n"
+                f"**Match:** {round(score * 100, 2)}%",
+                help="Click to view job details and tailored advice"
+            )
+            with st.expander("🔍 View Details"):
+                st.markdown(f"**Full Description:**\n\n{job['description']}")
 
-        st.subheader("🧐 Select a job to view full details and advice")
-        selected_index = st.selectbox("Choose a job", list(range(len(top_jobs))), format_func=lambda i: top_jobs[i][0]['title'])
-        selected_job, selected_score = top_jobs[selected_index]
+                if st.button(f"✍️ Tailor CV & Cover Letter for {job['title']}", key=f"tailor_{i}"):
+                    tailoring_prompt = f"""
+                    Based on my CV summary below, tailor a short professional CV summary and a 1-paragraph cover letter
+                    for this job titled: {job['title']}.
 
-        st.markdown(f"### 🧾 Full Job Description\n**{selected_job['title']}** in *{selected_job['location']}*")
-        st.markdown(selected_job["description"])
-        if selected_job["url"]:
-            st.markdown(f"🔗 [Apply Here]({selected_job['url']})")
+                    Job description: {job['description']}
+                    My CV summary: {cv_summary}
+                    """
+                    tailored_docs = ask_deepseek(tailoring_prompt)
+                    st.text_area("📄 Tailored Summary + Cover Letter", tailored_docs, height=250)
 
-        reasoning_prompt = f"""
-        I am evaluating a job match for this position: {selected_job['title']}
-        Job description: {selected_job['description']}
-
-        My CV summary is: {cv_summary}
-
-        - Why is this a good match?
-        - What is missing from my CV for this job?
-        - Should I apply? Give a short recommendation.
-        - If anything is missing, suggest how to improve it.
-        """
-        reasoning = ask_deepseek(reasoning_prompt)
-        st.success(reasoning)
+                emails = re.findall(r'[\w\.-]+@[\w\.-]+\.\w+', job["description"])
+                if emails:
+                    email_to = emails[0]
+                    st.markdown(f"📧 **Detected contact email:** `{email_to}`")
+                    if st.button("📤 Send tailored CV to email", key=f"send_{i}"):
+                        st.warning("⚠️ Email sending not yet enabled. You can integrate SendGrid or SMTP.")
+                else:
+                    st.info("📭 No contact email found in this job description.")
