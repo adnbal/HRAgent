@@ -27,6 +27,7 @@ def ask_deepseek(prompt):
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
     return response.json()["choices"][0]["message"]["content"]
 
+# ------------------- Twilio Config -------------------
 try:
     twilio_sid = st.secrets["twilio"]["account_sid"]
     twilio_token = st.secrets["twilio"]["auth_token"]
@@ -207,20 +208,3 @@ if uploaded_file:
                     st.success("📲 WhatsApp alert sent!")
                 except Exception as e:
                     st.warning(f"❌ WhatsApp failed: {e}")
-
-    st.subheader("📈 CV Quality Score (AI)")
-    score_response = ask_deepseek(f"Score this CV out of 100 and explain briefly:\n{cv_summary}")
-    st.markdown(f'<div class="neon-box">{score_response}</div>', unsafe_allow_html=True)
-
-    st.subheader("🤖 Ask AI About Your Career or CV")
-    user_q = st.text_input("💬 Your question:")
-    if user_q:
-        reply = ask_deepseek(f"Q: {user_q}\nContext:\n{cv_summary}")
-        st.markdown(f"**🧠 AI Answer:** {reply}")
-
-        styled_preview = ask_deepseek(
-            f"Based on these suggestions:\n{reply}\n\n"
-            "Give a styled preview of the updated CV in markdown format (small font)."
-        )
-        st.markdown("📌 **Do you want me to make these changes and give updated CV converted to PDF?**")
-        st.markdown(f"<div class='small-cv'>{styled_preview}</div>", unsafe_allow_html=True)
