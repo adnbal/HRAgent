@@ -1,22 +1,41 @@
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz
 import re
 import requests
 from fpdf import FPDF
 from io import BytesIO
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from openai import OpenAI
 
 # ------------------- CONFIG -------------------
-client = OpenAI(api_key=st.secrets["openai"]["api_key"])
+OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
+
+# ------------------- DeepSeek API via OpenRouter -------------------
+def ask_deepseek(prompt):
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://chat.openai.com/",
+        "X-Title": "cv-analyzer",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "deepseek/deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "You are an expert AI career advisor."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+    return response.json()["choices"][0]["message"]["content"]
+
+# ------------------- Twilio Config -------------------
 try:
     twilio_sid = st.secrets["twilio"]["account_sid"]
     twilio_token = st.secrets["twilio"]["auth_token"]
     whatsapp_to = st.secrets["twilio"]["whatsapp_to"]
     whatsapp_from = "whatsapp:+14155238886"
 except KeyError:
-    st.error("❌ Missing Twilio or OpenAI credentials.")
+    st.error("❌ Missing Twilio or OpenRouter credentials.")
     st.stop()
 
 def send_whatsapp_alert(message):
@@ -63,17 +82,6 @@ div.stButton > button:hover {
 """, unsafe_allow_html=True)
 
 # ------------------- UTILS -------------------
-def ask_openai(prompt):
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a helpful AI assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
-    )
-    return response.choices[0].message.content
-
 def extract_text_from_pdf(file):
     doc = fitz.open(stream=file.read(), filetype="pdf")
     return "".join(page.get_text() for page in doc)
@@ -129,18 +137,17 @@ uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
 if uploaded_file:
     with st.spinner("📄 Reading your CV..."):
         cv_text = extract_text_from_pdf(uploaded_file)
-        cv_summary = ask_openai(f"Summarize this CV:\n{cv_text}")
+        cv_summary = ask_deepseek(f"Summarize this CV:\n{cv_text}")
 
     keyword_prompt = """
     From this CV summary, extract the top 3 job roles most relevant to the candidate.
-    Prefer roles in AI, data science, business analytics, financial analytics, banking analytics, and policy-making.
-    Do not repeat similar terms and ensure a good role mix.
+    Prefer roles in artificial intelligence, data science, business analytics, financial analytics, banking analytics, and policy-making.
     Format:
     - Data Scientist
-    - Financial Analyst
-    - AI Policy Consultant
+    - AI Consultant
+    - Policy Advisor
     """
-    raw_keywords = ask_openai(f"{keyword_prompt}\nCV Summary:\n{cv_summary}")
+    raw_keywords = ask_deepseek(f"{keyword_prompt}\nCV Summary:\n{cv_summary}")
     roles = [re.sub(r"[-•0-9]", "", r).strip() for r in raw_keywords.strip().split("\n")]
     valid_roles = [r for r in roles if 3 <= len(r) <= 40]
     search_keyword = valid_roles[0].lower() if valid_roles else "data scientist"
@@ -170,14 +177,14 @@ if uploaded_file:
         st.markdown(f"### 🔹 [{job['title']} – {job['location']}]({job['url']}) — {match:.2f}% Match")
         with st.expander("📄 View Details"):
             st.write(job["description"])
-            reasoning = ask_openai(
+            reasoning = ask_deepseek(
                 f"Given this CV summary:\n{cv_summary}\n\nAnd this job:\n{job['description']}\n\n"
                 "Why is this a good match? What's missing? Should the candidate apply?"
             )
             st.success(reasoning)
 
             if st.button(f"✍️ Tailor CV for this job", key=f"tailor_{i}"):
-                tailored_cv = ask_openai(
+                tailored_cv = ask_deepseek(
                     f"Write a tailored version of this CV for the job below.\nJob: {job['description']}\nOriginal CV:\n{cv_summary}"
                 )
                 st.markdown(f"<div class='small-cv'>{tailored_cv}</div>", unsafe_allow_html=True)
@@ -197,18 +204,18 @@ if uploaded_file:
                     st.warning(f"❌ WhatsApp failed: {e}")
 
     st.subheader("📈 CV Quality Score (AI)")
-    score_response = ask_openai(f"Score this CV out of 100 and explain briefly:\n{cv_summary}")
+    score_response = ask_deepseek(f"Score this CV out of 100 and explain briefly:\n{cv_summary}")
     st.markdown(f'<div class="neon-box">{score_response}</div>', unsafe_allow_html=True)
 
     st.subheader("🤖 Ask AI About Your Career or CV")
     user_q = st.text_input("💬 Your question:")
     if user_q:
-        reply = ask_openai(f"Q: {user_q}\nContext:\n{cv_summary}")
+        reply = ask_deepseek(f"Q: {user_q}\nContext:\n{cv_summary}")
         st.markdown(f"**🧠 AI Answer:** {reply}")
         if "you should" in reply.lower() or "consider" in reply.lower():
-            styled_preview = ask_openai(
+            styled_preview = ask_deepseek(
                 f"Based on these suggestions:\n{reply}\n\n"
-                "Give a styled preview of the updated CV in markdown format (professional look, small font)."
+                "Give a styled preview of the updated CV in markdown format (small font)."
             )
             st.markdown("📌 **Do you want me to make these changes and give updated CV converted to PDF?**")
             st.markdown(f"<div class='small-cv'>{styled_preview}</div>", unsafe_allow_html=True)
