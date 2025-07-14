@@ -29,7 +29,7 @@ def extract_text_from_pdf(file):
     return text
 
 # -------------------- Adzuna API Job Search --------------------
-def fetch_jobs_from_adzuna(query, location="New Zealand", country="nz", max_results=10):
+def fetch_jobs_from_adzuna(query, location="United States", country="us", max_results=100):
     url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     params = {
         "app_id": st.secrets["adzuna"]["app_id"],
