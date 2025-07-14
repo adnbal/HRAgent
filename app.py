@@ -1,19 +1,17 @@
 import streamlit as st
-import fitz
+import fitz  # PyMuPDF
 import re
 from io import BytesIO
 from fpdf import FPDF
-import openai
+from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# -------------------- API CONFIG --------------------
-openai.api_key = st.secrets["openai"]["api_key"]
-if "organization" in st.secrets["openai"]:
-    openai.organization = st.secrets["openai"]["organization"]
+# -------------------- OpenAI v1.0+ Client --------------------
+client = OpenAI(api_key=st.secrets["openai"]["api_key"])
 
 def ask_openai(prompt):
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[
             {"role": "system", "content": "You are an expert career advisor and CV editor."},
@@ -23,9 +21,8 @@ def ask_openai(prompt):
     )
     return response.choices[0].message.content
 
-# -------------------- STYLING --------------------
+# -------------------- UI Styling --------------------
 st.set_page_config(page_title="🌟 AI CV Matcher", layout="wide")
-
 st.markdown("""
 <style>
 .neon-box {
@@ -60,7 +57,7 @@ div.stButton > button:hover {
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- FUNCTIONS --------------------
+# -------------------- Utility Functions --------------------
 def extract_text_from_pdf(file):
     doc = fitz.open(stream=file.read(), filetype="pdf")
     return "".join(page.get_text() for page in doc)
@@ -72,7 +69,7 @@ def fetch_dummy_jobs(keyword):
         {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
     ]
 
-# -------------------- MAIN APP --------------------
+# -------------------- App Logic --------------------
 st.title("🌟 AI CV Matcher with OpenAI GPT-4")
 
 uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
@@ -82,17 +79,17 @@ if uploaded_file:
         cv_text = extract_text_from_pdf(uploaded_file)
         cv_summary = ask_openai(f"Summarize this CV:\n{cv_text}")
 
-    # Overridden preferred roles (hidden from user)
+    # 👤 Preferred roles hardcoded for prototype (pretend AI detected it)
     preferred_roles = [
         "Artificial Intelligence", "Data Science", "Data Analytics", "Business Analytics",
         "Agentic AI", "Autonomous Agent", "Prompt Engineering",
         "Policy Modeling", "AI Governance", "Social Impact AI", "AI for Government"
     ]
-    search_keyword = "AI Specialist"
-
     st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b><br> ' +
                 ", ".join(preferred_roles) + '</div>', unsafe_allow_html=True)
 
+    # 🔍 Fetch dummy jobs and calculate similarity
+    search_keyword = "AI Specialist"
     jobs = fetch_dummy_jobs(search_keyword)
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
     cv_vec = embedder.encode([cv_summary])[0]
@@ -101,7 +98,7 @@ if uploaded_file:
     for job in jobs:
         job_vec = embedder.encode([job["description"]])[0]
         score = cosine_similarity([cv_vec], [job_vec])[0][0]
-        inflated = round(min(score * 1.2 * 100, 100), 2)
+        inflated = round(min(score * 1.2 * 100, 100), 2)  # 20% inflation
         job_scores.append((inflated, job))
 
     job_scores = sorted(job_scores, reverse=True)
@@ -127,7 +124,7 @@ if uploaded_file:
 
             st.button("⚡ Auto-Apply", key=f"autoapply_{i}")
 
-    # CV Quality Score and Suggestion
+    # 📈 CV Score & Improvement Option
     st.subheader("📈 CV Quality Score (AI Evaluation)")
     score_response = ask_openai(f"Score this CV out of 100 and explain improvements:\n{cv_summary}")
     st.markdown(f'<div class="neon-box">{score_response}</div>', unsafe_allow_html=True)
@@ -137,7 +134,7 @@ if uploaded_file:
         st.markdown("#### 📄 Updated CV (Preview)", unsafe_allow_html=True)
         st.markdown(f'<div class="small-cv">{improved_cv}</div>', unsafe_allow_html=True)
 
-    # Optional Q&A
+    # 💬 Q&A
     st.subheader("💬 Ask Anything About Your Career or CV")
     user_q = st.text_input("Type your question:")
     if user_q:
