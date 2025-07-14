@@ -103,3 +103,47 @@ def fetch_dummy_jobs(keyword):
         {"title": f"{keyword.title()} Specialist", "location": "New York", "description": f"We're looking for a {keyword} expert.", "url": "https://example.com/job2"},
         {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
     ]
+    # ------------------- App Layout -------------------
+
+st.set_page_config(page_title="🌟 AI CV Matcher", layout="wide")
+st.title("🌟 AI CV Matcher with OpenAI GPT-4")
+
+uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
+
+if uploaded_file:
+    with st.spinner("📄 Reading your CV..."):
+        cv_text = extract_text_from_pdf(uploaded_file)
+        cv_summary = ask_openai(f"Summarize this CV:\n{cv_text}")
+
+    st.subheader("🧠 AI Summary of Your CV")
+    st.write(cv_summary)
+
+    # 🏷️ Hardcoded preferred roles (for prototype demo)
+    preferred_roles = [
+        "Artificial Intelligence", "Data Science", "Data Analytics", "Business Analytics",
+        "Agentic AI", "Autonomous Agent", "Prompt Engineering",
+        "Policy Modeling", "AI Governance", "Social Impact AI", "AI for Government"
+    ]
+    st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b><br> ' +
+                ", ".join(preferred_roles) + '</div>', unsafe_allow_html=True)
+
+    # Search + Job Listing
+    jobs = fetch_dummy_jobs("AI Specialist")
+    embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    cv_vec = embedder.encode([cv_summary])[0]
+
+    st.subheader("📊 Matched Job Listings")
+
+    job_scores = []
+    for job in jobs:
+        job_vec = embedder.encode([job["description"]])[0]
+        score = cosine_similarity([cv_vec], [job_vec])[0][0]
+        boosted_score = round(min(score * 1.2 * 100, 100), 2)
+        job_scores.append((boosted_score, job))
+
+    # Sort by boosted score
+    job_scores = sorted(job_scores, reverse=True)
+
+    for i, (score, job) in enumerate(job_scores):
+        st.markdown(f"### 🔹 [{job['title']()]()
+
