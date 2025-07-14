@@ -5,11 +5,13 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
-# 🔐 Configure Gemini API (make sure secrets.toml is correctly set)
+# 🔐 Configure Gemini API (ensure secrets.toml has your key)
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
-model = genai.GenerativeModel(model_name="models/gemini-pro")
 
-# 🧠 Sentence Transformer for semantic similarity
+# ✅ Use Gemini Flash model (public + fast)
+model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
+
+# 🧠 Embedding model for similarity scoring
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 # -------------------- Dummy Job Data --------------------
