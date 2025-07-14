@@ -5,16 +5,14 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
-# 🔐 Configure Gemini API (ensure secrets.toml has your key)
+# 🔐 Configure Gemini API
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
+model = genai.GenerativeModel("gemini-1.5-flash")  # ✅ WORKING MODEL
 
-# ✅ Use Gemini Flash model (public + fast)
-model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
-
-# 🧠 Embedding model for similarity scoring
+# 🧠 Embedding model for semantic comparison
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# -------------------- Dummy Job Data --------------------
+# -------------------- Dummy Job Database --------------------
 JOB_DB = [
     {
         "title": "Data Analyst",
@@ -62,7 +60,7 @@ if uploaded_file:
         - Education
         - Job roles or titles held
         - Career interests (if mentioned)
-        
+
         CV Text:
         {cv_text}
         """
@@ -95,12 +93,12 @@ if uploaded_file:
             st.markdown(f"> {job['description']}")
             st.markdown("---")
 
-        # -------------------- Gemini-Powered Application Advice --------------------
+        # -------------------- Gemini-Powered Cover Letter Advice --------------------
         best_job = top_jobs[0][0]
         advice_prompt = f"""
         I am applying for this job: {best_job['title']}
         Job description: {best_job['description']}
-        
+
         My CV summary is: {cv_summary}
 
         What should I highlight in my application?
