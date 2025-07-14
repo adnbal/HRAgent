@@ -26,18 +26,17 @@ st.markdown("""
         background-color: #000000;
         color: white;
     }
-    .css-ffhzg2 { color: white !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# -------------------- Twilio WhatsApp --------------------
+# -------------------- WhatsApp via Twilio --------------------
 try:
     twilio_sid = st.secrets["twilio"]["account_sid"]
     twilio_token = st.secrets["twilio"]["auth_token"]
     whatsapp_to = st.secrets["twilio"]["whatsapp_to"]
     whatsapp_from = "whatsapp:+14155238886"
 except KeyError:
-    st.error("🔐 Missing Twilio credentials in `.streamlit/secrets.toml`.")
+    st.error("🔐 Missing Twilio credentials.")
     st.stop()
 
 def send_whatsapp_alert(message):
@@ -69,34 +68,15 @@ def ask_deepseek(prompt):
 
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# -------------------- Adzuna Job Fetch --------------------
-country_map = {
-    "New Zealand": "nz", "Australia": "au", "United States": "us",
-    "United Kingdom": "gb", "Canada": "ca", "India": "in"
-}
-def fetch_jobs_from_adzuna(query, location="", country="us", max_results=10):
-    url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
-    params = {
-        "app_id": st.secrets["adzuna"]["app_id"],
-        "app_key": st.secrets["adzuna"]["app_key"],
-        "results_per_page": max_results,
-        "what": query,
-        "where": location,
-        "content-type": "application/json"
-    }
-    response = requests.get(url, params=params)
-    if response.status_code != 200:
-        st.error(f"❌ Adzuna API Error: {response.text}")
-        return []
-    return [
-        {
-            "title": job["title"],
-            "description": job.get("description", ""),
-            "location": job.get("location", {}).get("display_name", ""),
-            "url": job.get("redirect_url", "")
-        }
-        for job in response.json().get("results", [])
+# -------------------- Dummy Job API --------------------
+def fetch_dummy_jobs(keyword, max_results=5):
+    # Dummy placeholder job data
+    dummy_jobs = [
+        {"title": f"{keyword.title()} at TechCorp", "description": "We are hiring a " + keyword + " to lead AI innovation.", "location": "Remote", "url": "https://example.com/job1"},
+        {"title": f"Senior {keyword.title()} Role", "description": f"Looking for an expert in {keyword}.", "location": "New York, USA", "url": "https://example.com/job2"},
+        {"title": f"{keyword.title()} Specialist", "description": f"Join our global analytics team as a {keyword}.", "location": "London, UK", "url": "https://example.com/job3"},
     ]
+    return dummy_jobs[:max_results]
 
 # -------------------- PDF Extraction --------------------
 def extract_text_from_pdf(file):
@@ -119,74 +99,87 @@ def generate_pdf(text, filename="tailored_cv.pdf"):
     return buffer
 
 # -------------------- Streamlit UI --------------------
-st.set_page_config(page_title="💡 AI CV Matcher", layout="wide")
-st.title("🚀 AI CV Matcher with WhatsApp Alert, PDF Download, and Neon Demo UI")
+st.set_page_config(page_title="🚀 AI CV Matcher & Smart Alerts", layout="wide")
+st.title("🌟 AI-Based CV Matcher with PDF Export, WhatsApp Alerts, and Tailored Applications")
 
 uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
 
 if uploaded_file:
     with st.spinner("📄 Analyzing your CV..."):
         cv_text = extract_text_from_pdf(uploaded_file)
+        cv_summary = ask_deepseek(f"Summarize this CV:\n{cv_text}")
 
-        cv_summary = ask_deepseek(f"Summarize this CV: {cv_text}")
-        job_keywords = ask_deepseek(f"Extract top job roles for this CV: {cv_summary}").split("\n")[0]
-        clean_keyword = re.sub(r"[^a-zA-Z0-9\s]", "", job_keywords).strip().lower()
+        # Force plain keyword output
+        keyword_prompt = f"""
+        From the CV summary below, extract the top 3 job roles the candidate is best suited for.
+        Return just the role names like: Data Analyst, AI Engineer, etc.
+        No extra explanation.
 
-    st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b> {clean_keyword.title()}</div>', unsafe_allow_html=True)
-    country_name = st.selectbox("🌍 Choose Country", list(country_map.keys()), index=2)
-    country_code = country_map[country_name]
-    location = st.text_input("📍 City or Region (optional)", "")
+        CV Summary:
+        {cv_summary}
+        """
+        raw_keywords = ask_deepseek(keyword_prompt)
+        lines = raw_keywords.strip().split("\n")
+        search_keywords = None
+        for line in lines:
+            clean_line = re.sub(r"[^a-zA-Z0-9\s]", "", line).strip()
+            if 3 <= len(clean_line) <= 40:
+                search_keywords = clean_line.lower()
+                break
 
-    jobs = fetch_jobs_from_adzuna(query=clean_keyword, location=location, country=country_code)
-    if not jobs:
-        st.error("❌ No jobs found.")
-        st.stop()
+        if not search_keywords:
+            st.error("❌ Could not extract a valid job role.")
+            st.stop()
 
-    with st.spinner("🔍 Matching CV with jobs..."):
+        st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b> {search_keywords.title()}</div>', unsafe_allow_html=True)
+
+        # Fetch dummy job matches
+        jobs = fetch_dummy_jobs(search_keywords)
+
+        st.subheader("📊 Matched Job Opportunities")
         cv_vector = embedder.encode([cv_summary])[0]
         match_scores = []
         for job in jobs:
             job_vector = embedder.encode([job["description"]])[0]
             score = cosine_similarity([cv_vector], [job_vector])[0][0]
             match_scores.append((job, score))
-        top_jobs = sorted(match_scores, key=lambda x: x[1], reverse=True)
 
-    st.subheader("📊 Top Matches")
+        for i, (job, score) in enumerate(match_scores):
+            match_percent = round(score * 100, 2)
+            st.markdown(f"### 🔹 [{job['title']} - {job['location']}]({job['url']}) — {match_percent}% Match")
+            with st.expander("📝 View Details"):
+                st.markdown(job["description"])
+                advice = ask_deepseek(f"Evaluate this job for the candidate:\nJob: {job['title']}\n{job['description']}\nCV: {cv_summary}")
+                st.success(advice)
 
-    for i, (job, score) in enumerate(top_jobs):
-        match_percent = round(score * 100, 2)
-        st.markdown(f"### 🔹 [{job['title']} - {job['location']}]({job['url']}) — {match_percent}% Match")
-        with st.expander("📝 View Details"):
-            st.markdown(job["description"])
+                tailoring_prompt = f"Write a full tailored CV for this job:\n{job['description']}\nOriginal CV:\n{cv_summary}"
+                if st.button("✍️ Generate Tailored CV", key=f"cv_{i}"):
+                    tailored_cv = ask_deepseek(tailoring_prompt)
+                    st.text_area("📄 Tailored CV (Formatted)", tailored_cv, height=400)
 
-            advice = ask_deepseek(f"Evaluate this job: {job['title']}\n{job['description']}\nCV: {cv_summary}")
-            st.success(advice)
+                    # PDF Download
+                    pdf_file = generate_pdf(tailored_cv)
+                    st.download_button("📥 Download as PDF", data=pdf_file, file_name="Tailored_CV.pdf")
 
-            tailoring_prompt = f"Write a full tailored CV based on this job description: {job['description']}\nOriginal CV: {cv_summary}"
-            if st.button("✍️ Generate Tailored CV", key=f"cv_{i}"):
-                tailored_cv = ask_deepseek(tailoring_prompt)
-                st.text_area("📄 Tailored CV (Formatted)", tailored_cv, height=400)
+                    # Dummy Email Button
+                    st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_dummy_{i}")
 
-                pdf_file = generate_pdf(tailored_cv)
-                st.download_button("📥 Download as PDF", data=pdf_file, file_name="Tailored_CV.pdf")
+                # WhatsApp alert if match ≥ 50%
+                if score >= 0.5:
+                    try:
+                        send_whatsapp_alert(f"📬 Job Match Alert!\n{job['title']} ({match_percent}%)\n{job['url']}")
+                        st.success("📲 WhatsApp alert sent!")
+                    except Exception as e:
+                        st.warning(f"❌ WhatsApp alert failed: {str(e)}")
 
-                st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_dummy_{i}")
-
-            if score >= 0.5:
-                try:
-                    send_whatsapp_alert(f"📬 Job Match Alert!\n{job['title']} ({match_percent}%)\n{job['url']}")
-                    st.success("📲 WhatsApp alert sent!")
-                except Exception as e:
-                    st.warning(f"❌ WhatsApp alert failed: {str(e)}")
-
-    # 🧠 CV Quality Score
+    # CV Quality Score
     st.subheader("📈 CV Quality Score (AI)")
-    score_prompt = f"Give a CV quality score from 0–100 and explain reasoning for this CV:\n{cv_summary}"
-    score_feedback = ask_deepseek(score_prompt)
-    st.markdown(f'<div class="neon-box">{score_feedback}</div>', unsafe_allow_html=True)
+    score_prompt = f"Give a CV quality score (0–100) and brief reasoning for this CV:\n{cv_summary}"
+    quality_feedback = ask_deepseek(score_prompt)
+    st.markdown(f'<div class="neon-box">{quality_feedback}</div>', unsafe_allow_html=True)
 
-    # ❓ AI Q&A Section
-    st.subheader("🤖 Ask Anything About Your Career or CV")
+    # AI Q&A Section
+    st.subheader("🤖 Ask About Your CV or Career")
     user_q = st.text_input("💬 Ask a question to the AI:")
     if user_q:
         ai_a = ask_deepseek(f"Q: {user_q}\nContext: {cv_summary}")
