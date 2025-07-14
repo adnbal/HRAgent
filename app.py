@@ -10,13 +10,13 @@ import numpy as np
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-# 🧠 Embedding model for semantic job matching
+# 🧠 Embedding model for semantic similarity
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 # -------------------- Streamlit UI --------------------
-st.set_page_config(page_title="🔍 Smart Job Match AI", layout="wide")
+st.set_page_config(page_title="🔍 AI Job Finder", layout="wide")
 st.title("🔍 AI-Powered CV Matcher & Real-Time Job Finder")
-st.markdown("Upload your CV to find real jobs from Adzuna, with AI-generated application advice.")
+st.markdown("Upload your CV to get real job matches from Adzuna, with AI cover letter help.")
 
 uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
 
@@ -28,8 +28,8 @@ def extract_text_from_pdf(file):
         text += page.get_text()
     return text
 
-# -------------------- Fetch Jobs from Adzuna --------------------
-def fetch_jobs_from_adzuna(query, location="Auckland", country="nz", max_results=10):
+# -------------------- Adzuna API Job Search --------------------
+def fetch_jobs_from_adzuna(query, location="New Zealand", country="nz", max_results=10):
     url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
     params = {
         "app_id": st.secrets["adzuna"]["app_id"],
@@ -39,12 +39,10 @@ def fetch_jobs_from_adzuna(query, location="Auckland", country="nz", max_results
         "where": location,
         "content-type": "application/json"
     }
-
     response = requests.get(url, params=params)
     if response.status_code != 200:
         st.error(f"❌ Adzuna API Error: {response.text}")
         return []
-
     jobs = response.json().get("results", [])
     return [
         {
@@ -57,10 +55,10 @@ def fetch_jobs_from_adzuna(query, location="Auckland", country="nz", max_results
 
 # -------------------- Main App Logic --------------------
 if uploaded_file:
-    with st.spinner("📄 Reading and analyzing your CV..."):
+    with st.spinner("📄 Extracting and analyzing your CV..."):
         cv_text = extract_text_from_pdf(uploaded_file)
 
-        # 🎯 Extract structured summary from CV
+        # 🎯 Get summary from Gemini
         prompt = f"""
         Extract the following from this CV text:
         - Top skills
@@ -79,32 +77,40 @@ if uploaded_file:
             st.error(f"❌ Gemini Error: {e}")
             st.stop()
 
-        st.subheader("🧾 CV Summary (AI-Extracted)")
+        st.subheader("🧾 AI-Curated CV Summary")
         st.info(cv_summary)
 
-        # -------------------- Extract Keywords for Search --------------------
+        # 🔍 Extract keywords
         keyword_prompt = f"""
-        Based on this CV, extract the top 1-3 job search keywords (e.g. 'data analyst', 'python developer'):
+        Based on this CV, extract 1–3 job search keywords (e.g. 'data analyst', 'marketing intern').
 
         CV:
         {cv_summary}
         """
         try:
             keywords_resp = model.generate_content(keyword_prompt).text
-            search_keywords = keywords_resp.strip().split("\n")[0]
+            st.subheader("🧠 Suggested Job Search Keywords")
+            st.code(keywords_resp.strip())
         except:
-            search_keywords = "data analyst"
+            keywords_resp = "data analyst"
 
-        st.subheader("🌐 Job Search")
-        st.markdown(f"🔍 Searching **Adzuna** for: `{search_keywords}` in New Zealand...")
+        # Manual override for keywords and location
+        search_keywords = st.text_input("🔍 Edit search keywords", value=keywords_resp.strip().split("\n")[0] if keywords_resp else "data analyst")
+        location = st.text_input("📍 Location", value="New Zealand")
 
-        jobs = fetch_jobs_from_adzuna(query=search_keywords)
+        # 🔎 Fetch jobs from Adzuna
+        st.subheader(f"🌐 Searching Adzuna for: `{search_keywords}` in `{location}`")
+        jobs = fetch_jobs_from_adzuna(query=search_keywords, location=location)
+
         if not jobs:
-            st.error("❌ No jobs found. Try editing your CV or expanding search.")
+            st.error("❌ No jobs found. Try different keywords or a broader location.")
+            st.write("🔎 Keywords used:", search_keywords)
+            st.write("📍 Location used:", location)
             st.stop()
 
-        # -------------------- Match CV with Job Descriptions --------------------
-        with st.spinner("🔎 Matching CV to job descriptions..."):
+        # 🧠 Match jobs using semantic similarity
+        st.subheader("✅ Top Matched Jobs")
+        with st.spinner("🔎 Matching your CV with job descriptions..."):
             cv_vector = embedder.encode([cv_summary])[0]
             match_scores = []
             for job in jobs:
@@ -114,13 +120,13 @@ if uploaded_file:
 
             top_jobs = sorted(match_scores, key=lambda x: x[1], reverse=True)[:3]
 
-        st.subheader("✅ Top Matched Jobs")
         for job, score in top_jobs:
             st.markdown(f"**🧑‍💼 {job['title']}** in *{job['location']}* — Match Score: `{round(score*100, 2)}%`")
             st.markdown(f"> {job['description'][:400]}...")
             st.markdown("---")
 
-        # -------------------- Cover Letter Advice from Gemini --------------------
+        # 📝 Generate cover letter advice
+        st.subheader("✍️ Gemini-Powered Application Advice")
         best_job = top_jobs[0][0]
         advice_prompt = f"""
         I am applying for this job: {best_job['title']}
@@ -129,12 +135,10 @@ if uploaded_file:
         My CV summary is: {cv_summary}
 
         What should I highlight in my application?
-        Can you write a short and tailored cover letter?
+        Can you write a short, tailored cover letter?
         """
-
         try:
-            cover_letter = model.generate_content(advice_prompt).text
-            st.subheader("📝 AI-Generated Cover Letter Advice")
-            st.success(cover_letter)
+            letter = model.generate_content(advice_prompt).text
+            st.success(letter)
         except Exception as e:
-            st.error(f"❌ Failed to generate cover letter: {e}")
+            st.error(f"❌ Cover letter generation failed: {e}")
