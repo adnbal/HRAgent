@@ -1,15 +1,36 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import google.generativeai as genai
 import requests
 import re
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# 🔐 Gemini setup
-genai.configure(api_key=st.secrets["gemini"]["api_key"])
-model = genai.GenerativeModel("gemini-1.5-flash")
+# ----------------- DeepSeek via OpenRouter Setup -----------------
+import json
+
+OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
+headers = {
+    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+    "HTTP-Referer": "https://chat.openai.com/",
+    "Content-Type": "application/json"
+}
+def ask_deepseek(prompt):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    payload = {
+        "model": "deepseek/deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "You are an AI job assistant helping analyze CVs and job postings."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.7
+    }
+    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    if response.status_code == 200:
+        return response.json()['choices'][0]['message']['content']
+    else:
+        st.error(f"❌ DeepSeek error: {response.text}")
+        return "Sorry, DeepSeek failed to respond."
 
 # 🧠 SentenceTransformer for semantic similarity
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
@@ -65,7 +86,7 @@ if uploaded_file:
     with st.spinner("📄 Analyzing your CV..."):
         cv_text = extract_text_from_pdf(uploaded_file)
 
-        prompt = f"""
+        summary_prompt = f"""
         Extract the following from this CV:
         - Top skills
         - Work experience
@@ -76,27 +97,20 @@ if uploaded_file:
         CV Text:
         {cv_text}
         """
-        try:
-            cv_summary = model.generate_content(prompt).text
-        except Exception as e:
-            st.error(f"❌ Gemini error: {e}")
-            st.stop()
+        cv_summary = ask_deepseek(summary_prompt)
 
-        st.subheader("🧾 Gemini-Curated CV Summary")
+        st.subheader("🧾 AI-Curated CV Summary")
         st.info(cv_summary)
 
         keyword_prompt = f"""
         Based on this CV, extract the top 1–3 job search keywords (e.g. 'data analyst', 'AI engineer').
-        Return just the keywords.
+        Return just the keywords as a plain list.
         CV:
         {cv_summary}
         """
-        try:
-            raw_keywords = model.generate_content(keyword_prompt).text
-            st.subheader("🧠 Raw AI Keywords")
-            st.code(raw_keywords.strip())
-        except:
-            raw_keywords = "data analyst"
+        raw_keywords = ask_deepseek(keyword_prompt)
+        st.subheader("🧠 AI Keywords")
+        st.code(raw_keywords.strip())
 
         first_line = raw_keywords.strip().split("\n")[0]
         clean_keyword = re.sub(r"[^a-zA-Z0-9\s]", "", first_line)
@@ -147,7 +161,7 @@ if uploaded_file:
         if selected_job["url"]:
             st.markdown(f"🔗 [Apply Here]({selected_job['url']})")
 
-        explain_prompt = f"""
+        reasoning_prompt = f"""
         I am evaluating a job match for this position: {selected_job['title']}
         Job description: {selected_job['description']}
 
@@ -158,8 +172,5 @@ if uploaded_file:
         - Should I apply? Give a short recommendation.
         - If anything is missing, suggest how to improve it.
         """
-        try:
-            reasoning = model.generate_content(explain_prompt).text
-            st.success(reasoning)
-        except Exception as e:
-            st.error(f"❌ Gemini explanation failed: {e}")
+        reasoning = ask_deepseek(reasoning_prompt)
+        st.success(reasoning)
