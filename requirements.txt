@@ -3,3 +3,4 @@ PyMuPDF
 google-generativeai
 sentence-transformers
 scikit-learn
+requests
