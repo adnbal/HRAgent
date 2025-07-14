@@ -42,6 +42,23 @@ st.markdown("""
     background-color: #000000;
     color: white;
 }
+button {
+    border: 1px solid #00FFFF !important;
+    color: white !important;
+    background-color: black !important;
+    border-radius: 8px !important;
+    box-shadow: 0 0 8px #00FFFF, 0 0 16px #00FFFF !important;
+}
+div.stButton > button:hover {
+    background-color: #00ffff !important;
+    color: black !important;
+}
+.small-cv {
+    font-size: 13px !important;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    font-family: 'Courier New', monospace;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -53,7 +70,7 @@ def ask_openai(prompt):
             {"role": "system", "content": "You are a helpful AI assistant."},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.7
+        temperature=0.3
     )
     return response.choices[0].message.content
 
@@ -103,7 +120,7 @@ def fetch_dummy_jobs(keyword):
         {"title": f"Lead {keyword.title()}", "location": "London", "description": f"Lead our {keyword} division.", "url": "https://example.com/job3"},
     ]
 
-# ------------------- APP UI -------------------
+# ------------------- APP -------------------
 st.set_page_config(page_title="🚀 AI CV Matcher", layout="wide")
 st.title("🌟 AI CV Matcher with Tailored Resume, WhatsApp Alerts & Glowing Demo UI")
 
@@ -115,16 +132,18 @@ if uploaded_file:
         cv_summary = ask_openai(f"Summarize this CV:\n{cv_text}")
 
     keyword_prompt = """
-    From this CV summary, extract the top 3 job roles best suited for the candidate.
-    Output just the roles in plain list like:
-    - Data Analyst
-    - AI Engineer
-    - Business Consultant
+    From this CV summary, extract the top 3 job roles most relevant to the candidate.
+    Prefer roles in AI, data science, business analytics, financial analytics, banking analytics, and policy-making.
+    Do not repeat similar terms and ensure a good role mix.
+    Format:
+    - Data Scientist
+    - Financial Analyst
+    - AI Policy Consultant
     """
     raw_keywords = ask_openai(f"{keyword_prompt}\nCV Summary:\n{cv_summary}")
     roles = [re.sub(r"[-•0-9]", "", r).strip() for r in raw_keywords.strip().split("\n")]
-    valid_roles = [r for r in roles if 3 <= len(r) <= 40 and " " in r]
-    search_keyword = valid_roles[0].lower() if valid_roles else "data analyst"
+    valid_roles = [r for r in roles if 3 <= len(r) <= 40]
+    search_keyword = valid_roles[0].lower() if valid_roles else "data scientist"
 
     st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b> {search_keyword.title()}</div>', unsafe_allow_html=True)
 
@@ -146,10 +165,9 @@ if uploaded_file:
     st.subheader("📊 Matched Job Listings")
     for i, job in enumerate(jobs):
         job_vec = embedder.encode([job["description"]])[0]
-        match = cosine_similarity([cv_vec], [job_vec])[0][0]
-        match_pct = round(match * 100, 2)
+        match = round(cosine_similarity([cv_vec], [job_vec])[0][0] * 100, 2)
 
-        st.markdown(f"### 🔹 [{job['title']} – {job['location']}]({job['url']}) — {match_pct}% Match")
+        st.markdown(f"### 🔹 [{job['title']} – {job['location']}]({job['url']}) — {match:.2f}% Match")
         with st.expander("📄 View Details"):
             st.write(job["description"])
             reasoning = ask_openai(
@@ -162,18 +180,18 @@ if uploaded_file:
                 tailored_cv = ask_openai(
                     f"Write a tailored version of this CV for the job below.\nJob: {job['description']}\nOriginal CV:\n{cv_summary}"
                 )
-                st.text_area("📄 Tailored CV", tailored_cv, height=400)
+                st.markdown(f"<div class='small-cv'>{tailored_cv}</div>", unsafe_allow_html=True)
 
                 pdf = generate_pdf(tailored_cv)
                 st.download_button("📥 Download as PDF", pdf, file_name="Tailored_CV.pdf")
 
                 st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_{i}")
 
-            st.button("🤖 Auto-Apply for this Job (Dummy)", key=f"autoapply_{i}")
+            st.button("🚀 Auto-Apply for this Job", key=f"autoapply_{i}")
 
-            if match >= 0.5:
+            if match >= 50:
                 try:
-                    send_whatsapp_alert(f"✅ Match: {job['title']} ({match_pct}%)\nApply: {job['url']}")
+                    send_whatsapp_alert(f"✅ Match: {job['title']} ({match:.2f}%)\nApply: {job['url']}")
                     st.success("📲 WhatsApp alert sent!")
                 except Exception as e:
                     st.warning(f"❌ WhatsApp failed: {e}")
@@ -187,11 +205,10 @@ if uploaded_file:
     if user_q:
         reply = ask_openai(f"Q: {user_q}\nContext:\n{cv_summary}")
         st.markdown(f"**🧠 AI Answer:** {reply}")
-
-        if "You should" in reply or "consider" in reply:
+        if "you should" in reply.lower() or "consider" in reply.lower():
             styled_preview = ask_openai(
                 f"Based on these suggestions:\n{reply}\n\n"
-                "Give a styled preview of the updated CV in markdown format (visually appealing)."
+                "Give a styled preview of the updated CV in markdown format (professional look, small font)."
             )
             st.markdown("📌 **Do you want me to make these changes and give updated CV converted to PDF?**")
-            st.markdown(styled_preview, unsafe_allow_html=True)
+            st.markdown(f"<div class='small-cv'>{styled_preview}</div>", unsafe_allow_html=True)
