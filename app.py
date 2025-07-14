@@ -68,17 +68,16 @@ def ask_deepseek(prompt):
 
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# -------------------- Dummy Job API --------------------
+# -------------------- Dummy Job Fetch --------------------
 def fetch_dummy_jobs(keyword, max_results=5):
-    # Dummy placeholder job data
     dummy_jobs = [
-        {"title": f"{keyword.title()} at TechCorp", "description": "We are hiring a " + keyword + " to lead AI innovation.", "location": "Remote", "url": "https://example.com/job1"},
+        {"title": f"{keyword.title()} at TechCorp", "description": f"We are hiring a {keyword} to lead AI innovation.", "location": "Remote", "url": "https://example.com/job1"},
         {"title": f"Senior {keyword.title()} Role", "description": f"Looking for an expert in {keyword}.", "location": "New York, USA", "url": "https://example.com/job2"},
-        {"title": f"{keyword.title()} Specialist", "description": f"Join our global analytics team as a {keyword}.", "location": "London, UK", "url": "https://example.com/job3"},
+        {"title": f"{keyword.title()} Specialist", "description": f"Join our global team as a {keyword}.", "location": "London, UK", "url": "https://example.com/job3"},
     ]
     return dummy_jobs[:max_results]
 
-# -------------------- PDF Extraction --------------------
+# -------------------- PDF Handling --------------------
 def extract_text_from_pdf(file):
     text = ""
     doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -99,7 +98,7 @@ def generate_pdf(text, filename="tailored_cv.pdf"):
     return buffer
 
 # -------------------- Streamlit UI --------------------
-st.set_page_config(page_title="🚀 AI CV Matcher & Smart Alerts", layout="wide")
+st.set_page_config(page_title="🚀 AI CV Matcher", layout="wide")
 st.title("🌟 AI-Based CV Matcher with PDF Export, WhatsApp Alerts, and Tailored Applications")
 
 uploaded_file = st.file_uploader("📄 Upload your CV (PDF only)", type=["pdf"])
@@ -109,12 +108,9 @@ if uploaded_file:
         cv_text = extract_text_from_pdf(uploaded_file)
         cv_summary = ask_deepseek(f"Summarize this CV:\n{cv_text}")
 
-        # Force plain keyword output
         keyword_prompt = f"""
-        From the CV summary below, extract the top 3 job roles the candidate is best suited for.
-        Return just the role names like: Data Analyst, AI Engineer, etc.
-        No extra explanation.
-
+        From this CV summary, extract the top 3 job roles the candidate is best suited for.
+        Return just the roles (e.g., Data Analyst, Machine Learning Engineer). No extra text.
         CV Summary:
         {cv_summary}
         """
@@ -122,18 +118,17 @@ if uploaded_file:
         lines = raw_keywords.strip().split("\n")
         search_keywords = None
         for line in lines:
-            clean_line = re.sub(r"[^a-zA-Z0-9\s]", "", line).strip()
-            if 3 <= len(clean_line) <= 40:
+            clean_line = re.sub(r"[-•0-9]", "", line).strip()
+            clean_line = re.sub(r"[^a-zA-Z\s]", "", clean_line).strip()
+            if 3 <= len(clean_line) <= 40 and " " in clean_line:
                 search_keywords = clean_line.lower()
                 break
-
         if not search_keywords:
-            st.error("❌ Could not extract a valid job role.")
-            st.stop()
+            search_keywords = "data analyst"
+            st.warning("⚠️ AI failed to extract job role. Using default: 'Data Analyst'.")
 
         st.markdown(f'<div class="neon-box">🧠 <b>Best Role Suited for You:</b> {search_keywords.title()}</div>', unsafe_allow_html=True)
 
-        # Fetch dummy job matches
         jobs = fetch_dummy_jobs(search_keywords)
 
         st.subheader("📊 Matched Job Opportunities")
@@ -149,22 +144,17 @@ if uploaded_file:
             st.markdown(f"### 🔹 [{job['title']} - {job['location']}]({job['url']}) — {match_percent}% Match")
             with st.expander("📝 View Details"):
                 st.markdown(job["description"])
-                advice = ask_deepseek(f"Evaluate this job for the candidate:\nJob: {job['title']}\n{job['description']}\nCV: {cv_summary}")
+                advice = ask_deepseek(f"Evaluate this job match:\nJob: {job['title']}\n{job['description']}\nCV: {cv_summary}")
                 st.success(advice)
 
                 tailoring_prompt = f"Write a full tailored CV for this job:\n{job['description']}\nOriginal CV:\n{cv_summary}"
                 if st.button("✍️ Generate Tailored CV", key=f"cv_{i}"):
                     tailored_cv = ask_deepseek(tailoring_prompt)
-                    st.text_area("📄 Tailored CV (Formatted)", tailored_cv, height=400)
-
-                    # PDF Download
+                    st.text_area("📄 Tailored CV", tailored_cv, height=400)
                     pdf_file = generate_pdf(tailored_cv)
                     st.download_button("📥 Download as PDF", data=pdf_file, file_name="Tailored_CV.pdf")
-
-                    # Dummy Email Button
                     st.button("📧 Do you want to email your tailored CV and cover letter?", key=f"email_dummy_{i}")
 
-                # WhatsApp alert if match ≥ 50%
                 if score >= 0.5:
                     try:
                         send_whatsapp_alert(f"📬 Job Match Alert!\n{job['title']} ({match_percent}%)\n{job['url']}")
@@ -172,15 +162,12 @@ if uploaded_file:
                     except Exception as e:
                         st.warning(f"❌ WhatsApp alert failed: {str(e)}")
 
-    # CV Quality Score
     st.subheader("📈 CV Quality Score (AI)")
-    score_prompt = f"Give a CV quality score (0–100) and brief reasoning for this CV:\n{cv_summary}"
-    quality_feedback = ask_deepseek(score_prompt)
-    st.markdown(f'<div class="neon-box">{quality_feedback}</div>', unsafe_allow_html=True)
+    score_feedback = ask_deepseek(f"Score this CV out of 100 and explain briefly:\n{cv_summary}")
+    st.markdown(f'<div class="neon-box">{score_feedback}</div>', unsafe_allow_html=True)
 
-    # AI Q&A Section
-    st.subheader("🤖 Ask About Your CV or Career")
-    user_q = st.text_input("💬 Ask a question to the AI:")
+    st.subheader("🤖 Ask the AI About Your Career or CV")
+    user_q = st.text_input("💬 Type your question:")
     if user_q:
-        ai_a = ask_deepseek(f"Q: {user_q}\nContext: {cv_summary}")
-        st.markdown(f"**🧠 AI Answer:** {ai_a}")
+        ai_response = ask_deepseek(f"Q: {user_q}\nContext:\n{cv_summary}")
+        st.markdown(f"**🧠 AI Answer:** {ai_response}")
